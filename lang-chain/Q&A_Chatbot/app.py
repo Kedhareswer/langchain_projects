@@ -61,34 +61,15 @@ def load_and_split_pdf(file_path):
 def get_embedding_model():
     return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-# Initialize LLM with better prompt template
+# Initialize LLM without system_prompt
 @st.cache_resource
 def init_llm():
-    # Define a better prompt template
-    prompt_template = """You are an expert assistant that helps answer questions based on the provided context.
-    
-    Context:
-    {context}
-    
-    Question: {question}
-    
-    Instructions:
-    1. Answer the question based on the context provided.
-    2. If the answer is not in the context, say "I don't have enough information to answer this question."
-    3. Be concise but thorough in your response.
-    4. If relevant, include the source document name and page number in your answer.
-    5. Format your answer in clear, easy-to-read paragraphs.
-    6. Use bullet points or numbered lists when appropriate.
-    
-    Answer:
-    """
-    
     return ChatGroq(
         api_key=groq_api_key,
         model_name="llama3-8b-8192",
-        temperature=0.2,  # Slightly higher temperature for more natural responses
-        model_kwargs={"top_p": 0.9, "max_tokens": 1024},
-        system_prompt=prompt_template
+        temperature=0.2,
+        top_p=0.9,
+        max_tokens=1024
     )
 
 # Session state initialization
@@ -175,12 +156,17 @@ def submit_query():
                 chain_type_kwargs={
                     "prompt": PromptTemplate(
                         template=(
+                            "You are an expert assistant that helps answer questions based on the provided context.\n\n"
                             "Context:\n{context}\n\n"
                             "Question: {question}\n\n"
-                            "Answer the question based on the context above. "
-                            "If the context doesn't contain the answer, say you don't know.\n"
-                            "If relevant, include the source document name and page number.\n"
-                            "Format your answer in clear, easy-to-read paragraphs."
+                            "Instructions:\n"
+                            "1. Answer the question based on the context provided.\n"
+                            "2. If the answer is not in the context, say \"I don't have enough information to answer this question.\"\n"
+                            "3. Be concise but thorough in your response.\n"
+                            "4. If relevant, include the source document name and page number in your answer.\n"
+                            "5. Format your answer in clear, easy-to-read paragraphs.\n"
+                            "6. Use bullet points or numbered lists when appropriate.\n\n"
+                            "Answer:"
                         ),
                         input_variables=["context", "question"],
                     )
