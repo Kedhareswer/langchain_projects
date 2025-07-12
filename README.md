@@ -109,10 +109,3 @@ PINECONE_API_KEY=your-pinecone-key
 ## 🤝 Contributing
 
 Pull requests and ideas are welcome! Open an issue for suggestions or bugs.
-
----
-
----
-
-Let me know if you'd like the `requirements.txt`, `.env.example`, or project-specific README files added as well.
-```
