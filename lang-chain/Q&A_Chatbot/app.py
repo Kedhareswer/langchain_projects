@@ -6,6 +6,7 @@ from langchain.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Pinecone as LangPinecone
 from langchain_groq import ChatGroq
 from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
 from pinecone import Pinecone, ServerlessSpec
 import pdfplumber
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -60,10 +61,35 @@ def load_and_split_pdf(file_path):
 def get_embedding_model():
     return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-# Initialize LLM
+# Initialize LLM with better prompt template
 @st.cache_resource
 def init_llm():
-    return ChatGroq(api_key=groq_api_key, model_name="llama3-8b-8192", temperature=0)
+    # Define a better prompt template
+    prompt_template = """You are an expert assistant that helps answer questions based on the provided context.
+    
+    Context:
+    {context}
+    
+    Question: {question}
+    
+    Instructions:
+    1. Answer the question based on the context provided.
+    2. If the answer is not in the context, say "I don't have enough information to answer this question."
+    3. Be concise but thorough in your response.
+    4. If relevant, include the source document name and page number in your answer.
+    5. Format your answer in clear, easy-to-read paragraphs.
+    6. Use bullet points or numbered lists when appropriate.
+    
+    Answer:
+    """
+    
+    return ChatGroq(
+        api_key=groq_api_key,
+        model_name="llama3-8b-8192",
+        temperature=0.2,  # Slightly higher temperature for more natural responses
+        model_kwargs={"top_p": 0.9, "max_tokens": 1024},
+        system_prompt=prompt_template
+    )
 
 # Session state initialization
 if 'chat_history' not in st.session_state:
@@ -134,16 +160,45 @@ def submit_query():
             # Initialize LLM
             llm = init_llm()
             
-            # Build the RAG chain
-            qa_chain = RetrievalQA.from_chain_type(
-                llm=llm,
-                retriever=st.session_state.vectorstore.as_retriever(),
-                return_source_documents=True
+            # Configure retriever with better parameters
+            retriever = st.session_state.vectorstore.as_retriever(
+                search_type="mmr",  # Use Maximal Marginal Relevance for better diversity
+                search_kwargs={"k": 5}  # Get top 5 relevant chunks
             )
             
-            # Get answer
-            result = qa_chain.invoke(current_query)
+            # Build the enhanced RAG chain with better prompt
+            qa_chain = RetrievalQA.from_chain_type(
+                llm=llm,
+                chain_type="stuff",
+                retriever=retriever,
+                return_source_documents=True,
+                chain_type_kwargs={
+                    "prompt": PromptTemplate(
+                        template=(
+                            "Context:\n{context}\n\n"
+                            "Question: {question}\n\n"
+                            "Answer the question based on the context above. "
+                            "If the context doesn't contain the answer, say you don't know.\n"
+                            "If relevant, include the source document name and page number.\n"
+                            "Format your answer in clear, easy-to-read paragraphs."
+                        ),
+                        input_variables=["context", "question"],
+                    )
+                }
+            )
+            
+            # Get answer with source documents
+            result = qa_chain.invoke({"query": current_query})
             answer = result['result']
+            
+            # Add source documents if available
+            if 'source_documents' in result and result['source_documents']:
+                sources = list(set(
+                    f"Page {doc.metadata.get('page', 'N/A')}" 
+                    for doc in result['source_documents']
+                ))
+                if sources:
+                    answer += f"\n\nSources: {', '.join(sources)}"
             
             # Update chat history with AI response
             st.session_state.chat_history.append({"role": "assistant", "content": answer})
@@ -157,7 +212,11 @@ if st.session_state.pdf_processed:
             if message["role"] == "user":
                 st.markdown(f"**You:** {message['content']}")
             else:
-                st.markdown(f"**AI:** {message['content']}")
+                # Format AI response with better markdown
+                response = message['content']
+                # Convert line breaks to markdown paragraphs
+                response = response.replace('\n', '  \n\n')
+                st.markdown(f"**AI:** {response}", unsafe_allow_html=True)
     
     # Query input with callback
     st.text_input(
